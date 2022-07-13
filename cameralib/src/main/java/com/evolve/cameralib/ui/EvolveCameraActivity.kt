@@ -9,6 +9,7 @@ import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.util.Log
 import android.view.*
 import androidx.appcompat.app.AppCompatActivity
@@ -51,15 +52,15 @@ class EvolveCameraActivity : AppCompatActivity(),
     private lateinit var cameraExecutor: ExecutorService
 
     private val forceImageCapture: Boolean by lazy {
-        intent?.extras?.getBoolean(EvolveImagePicker.KEY_CAMERA_CAPTURE_FORCE) == true
+        intent.getBooleanExtra(EvolveImagePicker.KEY_CAMERA_CAPTURE_FORCE, true)
     }
 
     private val frontCameraEnable: Boolean by lazy {
-        intent?.extras?.getBoolean(EvolveImagePicker.KEY_FRONT_CAMERA) == true
+        intent.getBooleanExtra(EvolveImagePicker.KEY_FRONT_CAMERA, false)
     }
 
     private val imgFileName: String by lazy {
-        intent?.extras?.getString(EvolveImagePicker.KEY_FILENAME, "") ?: ""
+        intent.getStringExtra(EvolveImagePicker.KEY_FILENAME) ?: ""
     }
 
     private val orientationEventListener by lazy {
@@ -133,6 +134,11 @@ class EvolveCameraActivity : AppCompatActivity(),
             e.printStackTrace()
         }
 
+    }
+
+    override fun onSaveInstanceState(outState: Bundle, outPersistentState: PersistableBundle) {
+        super.onSaveInstanceState(outState, outPersistentState)
+        outState.clear()
     }
 
     override fun onStart() {
@@ -365,15 +371,12 @@ class EvolveCameraActivity : AppCompatActivity(),
                         }
 
                         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            val savedUri = output.savedUri ?: Uri.fromFile(photoFile)
-                            Log.d(TAG, "Photo capture succeeded: $savedUri")
                             val intent = Intent()
-                            intent.data = savedUri
+                            intent.putExtra("imagePath", photoFile.absolutePath)
                             setResult(Activity.RESULT_OK, intent)
                             finish()
                         }
                     })
-
             }
         }
 

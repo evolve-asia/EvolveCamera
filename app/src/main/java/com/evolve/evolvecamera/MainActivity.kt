@@ -1,9 +1,9 @@
 package com.evolve.evolvecamera
 
 import android.content.Intent
-import android.content.Intent.ACTION_VIEW
 import android.net.Uri
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.widget.Button
 import android.widget.ImageView
 import androidx.activity.result.ActivityResultLauncher
@@ -21,10 +21,13 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            photoUri = result.data?.data
+            val intent = result?.data
+            val imagePath = intent?.getStringExtra("imagePath")
+            showImage(imagePath)
+         /*   photoUri = result.data?.data
             photoUri?.let {
                 showImage(it)
-            }
+            }*/
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,9 +46,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showImage(uri: Uri) {
+    override fun onSaveInstanceState(outState: Bundle, outPersistentState: PersistableBundle) {
+        super.onSaveInstanceState(outState, outPersistentState)
+        outState.clear()
+    }
+
+    private fun showImage(imagePath: String?) {
         Glide.with(this)
-            .load(uri)
+            .load(imagePath)
             .placeholder(R.drawable.ic_photo)
             .into(picture)
     }
