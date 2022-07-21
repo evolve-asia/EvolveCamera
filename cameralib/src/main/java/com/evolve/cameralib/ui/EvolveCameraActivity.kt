@@ -11,10 +11,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.util.Log
+import android.util.Size
 import android.view.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.*
+import androidx.camera.core.AspectRatio.RATIO_4_3
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -263,12 +265,15 @@ class EvolveCameraActivity : AppCompatActivity(),
         try {
             imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setTargetAspectRatio(screenAspectRatio)
+//                .setTargetAspectRatio(screenAspectRatio)
+                // .setTargetAspectRatio(RATIO_4_3)
+                .setTargetResolution(Size(1080, 1920))
                 .setTargetRotation(
                     rotation ?: OrientationEventListener.ORIENTATION_UNKNOWN
                 )
-                .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
+//                .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
                 .build()
+            camera?.cameraControl?.cancelFocusAndMetering()
         } catch (e: Exception) {
             Log.d(TAG, "bindCameraUseCases: imagecaptureformat error: ${e.localizedMessage}")
         }
@@ -371,6 +376,7 @@ class EvolveCameraActivity : AppCompatActivity(),
                         }
 
                         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                            println("fileSize:: -> ${photoFile.length() / 1024}")
                             val intent = Intent()
                             intent.putExtra("imagePath", photoFile.absolutePath)
                             setResult(Activity.RESULT_OK, intent)
