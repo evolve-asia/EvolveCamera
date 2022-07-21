@@ -247,8 +247,8 @@ class EvolveCameraActivity : AppCompatActivity(),
     }
 
     private fun bindCameraUseCases() {
-        val screenAspectRatio =
-            aspectRatio(windowMetrics.bounds.width(), windowMetrics.bounds.height())
+//        val screenAspectRatio =
+//            aspectRatio(windowMetrics.bounds.width(), windowMetrics.bounds.height())
         val rotation = binding?.viewFinder?.display?.rotation
         val cameraProvider = cameraProvider
             ?: throw IllegalStateException("Camera initialization failed.")
@@ -256,7 +256,7 @@ class EvolveCameraActivity : AppCompatActivity(),
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
         preview = Preview.Builder()
-            .setTargetAspectRatio(screenAspectRatio)
+            .setTargetAspectRatio(RATIO_4_3)
             .setTargetRotation(
                 rotation ?: OrientationEventListener.ORIENTATION_UNKNOWN
             )
@@ -267,7 +267,8 @@ class EvolveCameraActivity : AppCompatActivity(),
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
 //                .setTargetAspectRatio(screenAspectRatio)
                 // .setTargetAspectRatio(RATIO_4_3)
-                .setTargetResolution(Size(1080, 1920))
+//                .setTargetResolution(Size(1080, 1920))
+                .setTargetAspectRatio(RATIO_4_3)
                 .setTargetRotation(
                     rotation ?: OrientationEventListener.ORIENTATION_UNKNOWN
                 )
