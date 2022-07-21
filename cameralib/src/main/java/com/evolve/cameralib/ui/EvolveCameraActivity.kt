@@ -1,73 +1,73 @@
 package com.evolve.cameralib.ui
 
-import android.annotation.SuppressLint
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.ImageFormat
 import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.util.Log
+import android.util.Size
 import android.view.*
-import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.*
-import androidx.camera.core.ImageCapture.FLASH_MODE_AUTO
+import androidx.camera.core.AspectRatio.RATIO_4_3
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.Fragment
-import androidx.navigation.Navigation
-import androidx.window.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.window.layout.WindowMetrics
+import androidx.window.layout.WindowMetricsCalculator
+import com.evolve.cameralib.EvolveImagePicker
 import com.evolve.cameralib.R
+import com.evolve.cameralib.databinding.ActivityEvolveCameraBinding
 import com.evolve.cameralib.databinding.CameraUiContainerBinding
-import com.evolve.cameralib.databinding.FragmentCameraBinding
 import com.evolve.cameralib.utils.*
+import com.evolve.cameralib.utils.showToast
+import com.permissionx.guolindev.PermissionX
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import com.evolve.cameralib.EvolveImagePicker.Companion.KEY_CAMERA_CAPTURE_FORCE
-import com.evolve.cameralib.EvolveImagePicker.Companion.KEY_FILENAME
-import com.evolve.cameralib.EvolveImagePicker.Companion.KEY_FRONT_CAMERA
-import com.evolve.cameralib.EvolveImagePicker.Companion.KEY_IMAGE_CAPTURE_FORMAT
 
-/**
- * Main fragment for this app. Implements all camera operations including:
- * - Viewfinder
- * - Photo taking
- */
-class CameraFragment : Fragment() {
+private const val IMMERSIVE_FLAG_TIMEOUT = 500L
+private val TAG = EvolveCameraActivity::class.java.canonicalName
 
-    private val TAG = CameraFragment::class.java.canonicalName
+class EvolveCameraActivity : AppCompatActivity(),
+    CameraXConfig.Provider {
+
+    private var binding: ActivityEvolveCameraBinding? = null
+
     private var cameraUiContainerBinding: CameraUiContainerBinding? = null
-    private lateinit var fragmentCameraBinding: FragmentCameraBinding
+
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
-    private lateinit var windowManager: WindowManager
     private var deviceOrientation = OrientationEventListener.ORIENTATION_UNKNOWN
     private var displayId: Int = -1
     private lateinit var cameraExecutor: ExecutorService
+
     private val forceImageCapture: Boolean by lazy {
-        activity?.intent?.extras?.getBoolean(KEY_CAMERA_CAPTURE_FORCE) == true
+        intent.getBooleanExtra(EvolveImagePicker.KEY_CAMERA_CAPTURE_FORCE, true)
     }
+
     private val frontCameraEnable: Boolean by lazy {
-        activity?.intent?.extras?.getBoolean(KEY_FRONT_CAMERA) == true
+        intent.getBooleanExtra(EvolveImagePicker.KEY_FRONT_CAMERA, false)
     }
+
     private val imgFileName: String by lazy {
-        activity?.intent?.extras?.getString(KEY_FILENAME, "") ?: ""
+        intent.getStringExtra(EvolveImagePicker.KEY_FILENAME) ?: ""
     }
-    private val imageCaptureFormat: Int by lazy {
-        activity?.intent?.extras?.getInt(
-            KEY_IMAGE_CAPTURE_FORMAT,
-            ImageFormat.JPEG
-        ) ?: 0
-    }
+
     private val orientationEventListener by lazy {
         object : OrientationEventListener(
-            requireContext(),
+            this,
             SensorManager.SENSOR_DELAY_NORMAL
         ) {
             override fun onOrientationChanged(orientation: Int) {
@@ -102,17 +102,45 @@ class CameraFragment : Fragment() {
             }
         }
     }
+
     private val displayManager by lazy {
-        requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        this.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     }
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
         override fun onDisplayRemoved(displayId: Int) = Unit
-        override fun onDisplayChanged(displayId: Int) = view?.let { view ->
-            if (displayId == this@CameraFragment.displayId) {
+        override fun onDisplayChanged(displayId: Int) = binding?.root?.let { view ->
+            if (displayId == this@EvolveCameraActivity.displayId) {
                 imageCapture?.targetRotation = view.display.rotation
             }
         } ?: Unit
+    }
+
+    private lateinit var windowMetrics: WindowMetrics
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        binding = ActivityEvolveCameraBinding.inflate(layoutInflater)
+        setContentView(binding?.root)
+
+        try {
+            this.supportActionBar?.hide()
+
+            cameraExecutor = Executors.newSingleThreadExecutor()
+
+            checkPermission()
+
+        } catch (e: NullPointerException) {
+            e.printStackTrace()
+        }
+
+    }
+
+    override fun onSaveInstanceState(outState: Bundle, outPersistentState: PersistableBundle) {
+        super.onSaveInstanceState(outState, outPersistentState)
+        outState.clear()
     }
 
     override fun onStart() {
@@ -125,76 +153,87 @@ class CameraFragment : Fragment() {
         orientationEventListener.disable()
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val callback = object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                requireActivity().finish()
-            }
-        }
-        requireActivity().onBackPressedDispatcher.addCallback(requireActivity(), callback)
-    }
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        fragmentCameraBinding = FragmentCameraBinding.inflate(
-            inflater,
-            container,
-            false
-        )
-        return fragmentCameraBinding.root
+    override fun getCameraXConfig(): CameraXConfig {
+        return CameraXConfig.Builder.fromConfig(Camera2Config.defaultConfig())
+            .setMinimumLoggingLevel(Log.ERROR).build()
     }
 
     override fun onResume() {
         super.onResume()
-        if (!PermissionsFragment.hasPermissions(requireContext())) {
-            Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                CameraFragmentDirections.actionCameraFragmentToPermissionsFragment()
-            )
+        try {
+
+            binding?.cameraContainer?.postDelayed({
+                hideSystemUI()
+            }, IMMERSIVE_FLAG_TIMEOUT)
+
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
-    override fun onDestroyView() {
+    override fun onBackPressed() {
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            finishAfterTransition()
+        } else {
+            finish()
+            super.onBackPressed()
+        }
+    }
+
+    private fun hideSystemUI() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, binding!!.cameraContainer).let { controller ->
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    override fun onDestroy() {
+        binding = null
         cameraUiContainerBinding = null
-        super.onDestroyView()
+
         cameraExecutor.shutdown()
         displayManager.unregisterDisplayListener(displayListener)
+
+        super.onDestroy()
     }
 
-    @SuppressLint("MissingPermission", "ClickableViewAccessibility")
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
+    private fun checkPermission() {
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-        displayManager.registerDisplayListener(displayListener, null)
-        windowManager = WindowManager(view.context)
-
-        fragmentCameraBinding.viewFinder.post {
-            updateCameraUi()
-            setUpCamera()
-        }
-
-        fragmentCameraBinding.viewFinder.setOnTouchListener { _: View, motionEvent: MotionEvent ->
-            when (motionEvent.action) {
-                MotionEvent.ACTION_DOWN -> return@setOnTouchListener true
-                MotionEvent.ACTION_UP -> {
-                    val factory = fragmentCameraBinding.viewFinder.meteringPointFactory
-                    val point = factory.createPoint(motionEvent.x, motionEvent.y)
-                    val action = FocusMeteringAction.Builder(point).build()
-                    camera?.cameraControl?.startFocusAndMetering(action)
-                    return@setOnTouchListener true
-                }
-                else -> return@setOnTouchListener false
+        PermissionX.init(this)
+            .permissions(
+                Manifest.permission.CAMERA
+            )
+            .explainReasonBeforeRequest()
+            .onExplainRequestReason { scope, deniedList ->
+                scope.showRequestReasonDialog(
+                    deniedList,
+                    "Given permission is needed to take picture",
+                    "OK",
+                    "Cancel"
+                )
             }
-        }
-
+            .onForwardToSettings { scope, deniedList ->
+                scope.showForwardToSettingsDialog(
+                    deniedList,
+                    "You need to allow given permission in Settings youself",
+                    "OK",
+                    "Cancel"
+                )
+            }
+            .request { allGranted, _, _ ->
+                if (allGranted) {
+                    onPermissionGranted()
+                } else {
+                    this.showToast("Camera permission denied")
+                    finish()
+                }
+            }
     }
 
     private fun setUpCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
             lensFacing = when {
@@ -204,36 +243,43 @@ class CameraFragment : Fragment() {
             }
             updateCameraSwitchButton()
             bindCameraUseCases()
-        }, ContextCompat.getMainExecutor(requireContext()))
+        }, ContextCompat.getMainExecutor(this))
     }
 
     private fun bindCameraUseCases() {
-        val metrics = windowManager.getCurrentWindowMetrics().bounds
-        val screenAspectRatio = aspectRatio(metrics.width(), metrics.height())
-        val rotation = fragmentCameraBinding.viewFinder.display.rotation
+        val screenAspectRatio =
+            aspectRatio(windowMetrics.bounds.width(), windowMetrics.bounds.height())
+        val rotation = binding?.viewFinder?.display?.rotation
         val cameraProvider = cameraProvider
             ?: throw IllegalStateException("Camera initialization failed.")
+
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+
         preview = Preview.Builder()
             .setTargetAspectRatio(screenAspectRatio)
-            .setTargetRotation(rotation)
+            .setTargetRotation(
+                rotation ?: OrientationEventListener.ORIENTATION_UNKNOWN
+            )
             .build()
+
         try {
             imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setTargetAspectRatio(screenAspectRatio)
-                .setTargetRotation(rotation)
-                .setFlashMode(FLASH_MODE_AUTO)
-                .setBufferFormat(imageCaptureFormat)
+//                .setTargetAspectRatio(screenAspectRatio)
+                // .setTargetAspectRatio(RATIO_4_3)
+                .setTargetResolution(Size(1080, 1920))
+                .setTargetRotation(
+                    rotation ?: OrientationEventListener.ORIENTATION_UNKNOWN
+                )
+//                .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
                 .build()
+            camera?.cameraControl?.cancelFocusAndMetering()
         } catch (e: Exception) {
-            Toast.makeText(
-                requireActivity(),
-                "Image format unsupported", Toast.LENGTH_LONG
-            ).show()
             Log.d(TAG, "bindCameraUseCases: imagecaptureformat error: ${e.localizedMessage}")
         }
+
         cameraProvider.unbindAll()
+
         try {
             camera = cameraProvider.bindToLifecycle(
                 this,
@@ -241,15 +287,18 @@ class CameraFragment : Fragment() {
                 preview,
                 imageCapture
             )
-            preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
+
+            preview?.setSurfaceProvider(binding?.viewFinder?.surfaceProvider)
+
             observeCameraState(camera?.cameraInfo)
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
     }
 
     private fun observeCameraState(cameraInfo: CameraInfo?) {
-        cameraInfo?.cameraState?.observe(viewLifecycleOwner) { cameraState ->
+        cameraInfo?.cameraState?.observe(this) { cameraState ->
             run {
                 when (cameraState.type) {
                     CameraState.Type.PENDING_OPEN -> {
@@ -300,22 +349,26 @@ class CameraFragment : Fragment() {
 
     private fun updateCameraUi() {
         cameraUiContainerBinding?.root?.let {
-            fragmentCameraBinding.root.removeView(it)
+            binding?.root?.removeView(it)
         }
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
-            LayoutInflater.from(requireContext()),
-            fragmentCameraBinding.root,
+            LayoutInflater.from(this),
+            binding?.root,
             true
         )
         cameraUiContainerBinding?.cameraCaptureButton?.setOnClickListener {
             imageCapture?.let { imageCapture ->
-                val photoFile = createImageFile(requireContext(), imgFileName)
+
+                val photoFile = createImageFile(this, imgFileName)
+
                 val metadata = ImageCapture.Metadata().apply {
                     isReversedHorizontal = lensFacing == CameraSelector.LENS_FACING_FRONT
                 }
+
                 val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile)
                     .setMetadata(metadata)
                     .build()
+
                 imageCapture.takePicture(
                     outputOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
                         override fun onError(exc: ImageCaptureException) {
@@ -323,12 +376,11 @@ class CameraFragment : Fragment() {
                         }
 
                         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            val savedUri = output.savedUri ?: Uri.fromFile(photoFile)
-                            Log.d(TAG, "Photo capture succeeded: $savedUri")
+                            println("fileSize:: -> ${photoFile.length() / 1024}")
                             val intent = Intent()
-                            intent.data = savedUri
-                            requireActivity().setResult(Activity.RESULT_OK, intent)
-                            requireActivity().finish()
+                            intent.putExtra("imagePath", photoFile.absolutePath)
+                            setResult(Activity.RESULT_OK, intent)
+                            finish()
                         }
                     })
             }
@@ -361,7 +413,6 @@ class CameraFragment : Fragment() {
             cameraUiContainerBinding?.cameraSwitchButton?.isEnabled = false
         }
     }
-    // endregion
 
     private fun showSuccessToast() {
         cameraUiContainerBinding?.warningView?.layoutWarning?.visibility = View.GONE
@@ -388,4 +439,18 @@ class CameraFragment : Fragment() {
     private fun disableCaptureBtn() {
         cameraUiContainerBinding?.cameraCaptureButton?.isEnabled = false
     }
+
+    private fun onPermissionGranted() {
+
+        windowMetrics = WindowMetricsCalculator.getOrCreate()
+            .computeCurrentWindowMetrics(this)
+
+        displayManager.registerDisplayListener(displayListener, null)
+
+        binding?.viewFinder?.post {
+            updateCameraUi()
+            setUpCamera()
+        }
+    }
+
 }
