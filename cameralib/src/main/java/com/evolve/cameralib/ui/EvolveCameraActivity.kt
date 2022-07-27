@@ -387,6 +387,10 @@ class EvolveCameraActivity : AppCompatActivity(),
             }
         }
 
+        cameraUiContainerBinding?.imageBack?.setOnClickListener {
+            finish()
+        }
+
         cameraUiContainerBinding?.cameraSwitchButton?.let {
             it.isEnabled = false
             it.setOnClickListener {
